@@ -1,0 +1,54 @@
+WITH first_payment_dates AS (
+    SELECT user_id, date_trunc('month',MIN(payment_date))::date AS first_payment_month						
+    FROM project.games_payments 
+    GROUP BY user_id
+)
+, mrr AS (
+	--Monthly Recurring Revenue (MRR) and Paid users
+	SELECT 
+		date_trunc('month', gp.payment_date):: date AS MONTH
+		,gp.user_id
+		,revenue_amount_usd AS mrr							
+		,pu."language"
+		,pu.game_name
+		,pu.age 
+		,'MRR' AS metric
+	FROM project.games_payments gp
+	LEFT JOIN project.games_paid_users pu ON gp.user_id = pu.user_id 
+	)
+, new_mrr AS (
+--New MRR and New Paid Users
+	SELECT 
+		date_trunc('month', gp.payment_date):: date AS MONTH
+		,gp.user_id
+		,gp.revenue_amount_usd AS new_mrr
+		,pu."language"
+		,pu.game_name
+		,pu.age 	
+		,'New MRR' AS metric
+	FROM project.games_payments gp 
+	LEFT JOIN first_payment_dates fpd ON fpd.user_id = gp.user_id
+	JOIN project.games_paid_users pu ON fpd.user_id = pu.user_id
+	WHERE 
+		fpd.first_payment_month = date_trunc('month', gp.payment_date):: date	--this CONDITION gives payments, that were made for the first time
+	)
+,user_churn AS (
+	SELECT 
+		(date_trunc('month', gp.payment_date)+ interval '1 month')::date AS MONTH
+		,gp.user_id
+		,gp.revenue_amount_usd
+		,pu."language"
+		,pu.game_name
+		,pu.age 
+		,'churn' AS metric
+	FROM project.games_payments gp
+	LEFT JOIN project.games_payments gp_next ON gp.user_id = gp_next.user_id
+		AND date_trunc('month', gp.payment_date) = date_trunc('month', gp_next.payment_date) - interval '1 month'
+	JOIN project.games_paid_users pu ON pu.user_id = gp.user_id
+	WHERE gp_next.user_id IS NULL				--this IS CONDITION,that there IS NO payments IN NEXT MONTH FOR EACH user
+)
+SELECT * FROM mrr
+UNION ALL
+SELECT * FROM new_mrr
+UNION ALL 
+SELECT * FROM user_churn;
